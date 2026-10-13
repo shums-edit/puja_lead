@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+  <meta name="theme-color" content="#0b5d3b" />
+  <title>Wellness Campaign – Durga Puja 2026</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <!-- ================= LOGIN ================= -->
+  <section id="loginScreen" class="screen hidden">
+    <div class="login-card">
+      <div class="login-badge">Durga Puja 2026</div>
+      <h1 class="club-name">TS Global Wellness Club</h1>
+      <p class="login-sub">Wellness Campaign · Staff Login</p>
+
+      <div id="setupWarning" class="setup-warning hidden">
+        Firebase is not connected yet. Paste your project config in <b>firebase-config.js</b>.
+      </div>
+
+      <form id="loginForm" autocomplete="on">
+        <label class="field">
+          <span>Email</span>
+          <input type="email" id="loginEmail" required autocomplete="username" />
+        </label>
+        <label class="field">
+          <span>Password</span>
+          <div class="pw-wrap">
+            <input type="password" id="loginPassword" required autocomplete="current-password" />
+            <button type="button" id="pwToggle" class="pw-toggle" aria-label="Show password">
+              <svg id="eyeOpen" viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M12 5c-7 0-10 7-10 7s3 7 10 7 10-7 10-7-3-7-10-7zm0 11.5A4.5 4.5 0 1 1 12 7.5a4.5 4.5 0 0 1 0 9zm0-7a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5z"/></svg>
+              <svg id="eyeClosed" class="hidden" viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M2.1 3.5 3.5 2.1l18.4 18.4-1.4 1.4-3.2-3.2A11 11 0 0 1 12 19C5 19 2 12 2 12a17.6 17.6 0 0 1 4.2-5.4L2.1 3.5zM12 5c7 0 10 7 10 7a17.4 17.4 0 0 1-3.1 4.4l-3.5-3.5A4.5 4.5 0 0 0 10.1 7.6L7.9 5.4A11 11 0 0 1 12 5zm-4.4 6.4a4.5 4.5 0 0 0 5 5z"/></svg>
+            </button>
+          </div>
+        </label>
+        <p id="loginError" class="error-text"></p>
+        <button type="submit" id="loginBtn" class="btn btn-primary btn-block">Login</button>
+      </form>
+    </div>
+    <footer class="credit">Developed by <a href="https://sparkshums.netlify.app/" target="_blank" rel="noopener">Spark Shums</a></footer>
+  </section>
+
+  <!-- ================= APP ================= -->
+  <section id="appScreen" class="screen hidden">
+    <header class="app-header">
+      <div>
+        <div class="hdr-title">TS Global Wellness Club</div>
+        <div class="hdr-sub">Wellness Campaign · Durga Puja 2026</div>
+      </div>
+      <button id="logoutBtn" class="btn-ghost" title="Logout">Logout</button>
+    </header>
+
+    <div class="stats">
+      <div class="stat"><b id="statToday">0</b><span>Today</span></div>
+      <div class="stat"><b id="statTotal">0</b><span>Total Leads</span></div>
+      <div class="stat"><b id="statBody">0</b><span>Body Checked</span></div>
+      <div class="stat"><b id="statGift">0</b><span>Gifts Given</span></div>
+    </div>
+
+    <main class="panels">
+
+      <!-- ---------- 1. REGISTER ---------- -->
+      <section id="tab-register" class="panel active">
+        <div class="panel-head">
+          <h2 id="regTitle">New Registration</h2>
+          <button type="button" id="cancelEditBtn" class="btn-ghost hidden">Cancel Edit</button>
+        </div>
+
+        <form id="regForm" novalidate>
+          <div class="card">
+            <h3 class="sec-title">1. Contact Information</h3>
+            <label class="field"><span>Full Name *</span>
+              <input name="name" type="text" autocomplete="off" /></label>
+            <div class="row-2">
+              <label class="field"><span>Age *</span>
+                <input name="age" type="number" inputmode="numeric" min="1" max="120" /></label>
+              <label class="field"><span>Occupation *</span>
+                <input name="occupation" type="text" autocomplete="off" /></label>
+            </div>
+            <label class="field"><span>Mobile No. *</span>
+              <input name="mobile" type="tel" inputmode="numeric" maxlength="10" placeholder="10-digit number" /></label>
+            <label class="check-inline">
+              <input type="checkbox" id="sameAsMobile" /> WhatsApp same as Mobile
+            </label>
+            <label class="field"><span>WhatsApp No. *</span>
+              <input name="whatsapp" type="tel" inputmode="numeric" maxlength="10" placeholder="10-digit number" /></label>
+          </div>
+
+          <div class="card">
+            <h3 class="sec-title">2. Health &amp; Wellness Self-Assessment</h3>
+
+            <label class="field"><span>Health Goal *</span>
+              <input name="healthGoal" type="text" autocomplete="off" /></label>
+
+            <div class="field">
+              <span>Overall health &amp; fitness (1 = Unhealthy / Unfit, 10 = Very Healthy &amp; Fit) *</span>
+              <div class="rating" id="healthRating"></div>
+            </div>
+
+            <div class="field">
+              <span>Energy Level *</span>
+              <div class="slider-wrap">
+                <input type="range" id="energy" min="1" max="10" step="1" value="5" class="untouched" />
+                <output id="energyOut" class="slider-out">Drag to set</output>
+              </div>
+              <div class="slider-scale"><span>1 · Low</span><span>10 · High</span></div>
+            </div>
+
+            <div class="field">
+              <span>Taking regular medication? *</span>
+              <div class="seg">
+                <label><input type="radio" name="onMedication" value="Yes" /><i>Yes</i></label>
+                <label><input type="radio" name="onMedication" value="No" /><i>No</i></label>
+              </div>
+            </div>
+            <label class="field hidden" id="medDetailsWrap"><span>Specify medicine / condition *</span>
+              <input name="medicationDetails" type="text" autocomplete="off" /></label>
+
+            <div class="field">
+              <span>Basic physical challenges (tick all that apply) *</span>
+              <div class="checks" id="challengeList"></div>
+            </div>
+            <label class="field hidden" id="otherWrap"><span>Other challenge *</span>
+              <input name="challengeOther" type="text" autocomplete="off" /></label>
+          </div>
+
+          <div class="card">
+            <h3 class="sec-title">4. Preferences &amp; Next Steps</h3>
+            <div class="field">
+              <span>Would you like a complimentary personalized Wellness Consultation? *</span>
+              <div class="seg">
+                <label><input type="radio" name="wantsConsultation" value="Yes" /><i>Yes</i></label>
+                <label><input type="radio" name="wantsConsultation" value="No" /><i>No</i></label>
+              </div>
+            </div>
+            <div class="field">
+              <span>Interested in work-from-home or additional income opportunities? *</span>
+              <div class="seg">
+                <label><input type="radio" name="incomeInterest" value="Yes" /><i>Yes</i></label>
+                <label><input type="radio" name="incomeInterest" value="No" /><i>No</i></label>
+              </div>
+            </div>
+          </div>
+
+          <p class="note">Section 3 (Body Parameter Check) is filled on the <b>Body Check</b> tab.</p>
+          <button type="submit" id="regSubmit" class="btn btn-primary btn-block">Register &amp; Get Token</button>
+        </form>
+      </section>
+
+      <!-- ---------- 2. BODY CHECK ---------- -->
+      <section id="tab-body" class="panel">
+        <div class="panel-head"><h2>3. On-Site Body Parameter Check</h2></div>
+
+        <div id="bodyPick">
+          <input type="search" id="bodySearch" class="search" placeholder="Search token, name or mobile" />
+          <div class="list-label" id="bodyListLabel">Waiting for body check</div>
+          <div id="bodyList" class="mini-list"></div>
+        </div>
+
+        <form id="bodyForm" class="hidden" novalidate>
+          <div class="card person-card" id="bodyPerson"></div>
+          <div class="card">
+            <p class="note">Type the values exactly as shown on the machine.</p>
+            <div class="row-2">
+              <label class="field"><span>Height *</span>
+                <input name="height" type="text" inputmode="decimal" autocomplete="off" /></label>
+              <label class="field"><span>Unit</span>
+                <select name="heightUnit"><option value="cm">cm</option><option value="ft">ft</option></select></label>
+            </div>
+            <label class="field"><span>Weight (kg) *</span>
+              <input name="weight" type="text" inputmode="decimal" autocomplete="off" /></label>
+            <label class="field"><span>BMI *</span>
+              <input name="bmi" type="text" inputmode="decimal" autocomplete="off" /></label>
+            <div class="field">
+              <span>BMI Category *</span>
+              <div class="seg seg-4">
+                <label><input type="radio" name="bmiCategory" value="Underweight" /><i>Underweight</i></label>
+                <label><input type="radio" name="bmiCategory" value="Normal" /><i>Normal</i></label>
+                <label><input type="radio" name="bmiCategory" value="Overweight" /><i>Overweight</i></label>
+                <label><input type="radio" name="bmiCategory" value="Obese" /><i>Obese</i></label>
+              </div>
+            </div>
+          </div>
+          <div class="btn-row">
+            <button type="button" id="bodyBack" class="btn btn-light">Back</button>
+            <button type="submit" id="bodySubmit" class="btn btn-primary">Save Body Check</button>
+          </div>
+        </form>
+      </section>
+
+      <!-- ---------- 3. VERIFY & GIFT ---------- -->
+      <section id="tab-gift" class="panel">
+        <div class="panel-head"><h2>Verify &amp; Gift</h2></div>
+        <div class="golden">🔒 Golden Rule: No gift before registration is complete.</div>
+
+        <div id="giftPick">
+          <input type="search" id="giftSearch" class="search" placeholder="Search token, name or mobile" />
+          <div class="list-label" id="giftListLabel">Gift not given yet</div>
+          <div id="giftList" class="mini-list"></div>
+        </div>
+
+        <div id="giftView" class="hidden">
+          <div id="giftDetails"></div>
+          <div class="btn-row">
+            <button type="button" id="giftBack" class="btn btn-light">Back</button>
+            <button type="button" id="giftBtn" class="btn btn-gold">Mark Gift Given</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- ---------- 4. LEADS ---------- -->
+      <section id="tab-leads" class="panel">
+        <div class="panel-head">
+          <h2>Leads</h2>
+          <button type="button" id="exportBtn" class="btn btn-light btn-sm">Export CSV</button>
+        </div>
+        <input type="search" id="leadSearch" class="search" placeholder="Search token, name or mobile" />
+        <div class="chips" id="leadFilters">
+          <button class="chip active" data-f="all">All</button>
+          <button class="chip" data-f="followup">Follow-up Pending</button>
+          <button class="chip" data-f="consult">Consultation: Yes</button>
+          <button class="chip" data-f="income">Income: Yes</button>
+          <button class="chip" data-f="incomplete">Incomplete</button>
+        </div>
+        <div class="list-label" id="leadCount"></div>
+        <div id="leadList"></div>
+      </section>
+
+      <footer class="credit in-app">Developed by <a href="https://sparkshums.netlify.app/" target="_blank" rel="noopener">Spark Shums</a></footer>
+    </main>
+
+    <nav class="tabbar">
+      <button class="tab active" data-tab="register"><span class="ti">📝</span>Register</button>
+      <button class="tab" data-tab="body"><span class="ti">⚖️</span>Body Check</button>
+      <button class="tab" data-tab="gift"><span class="ti">🎁</span>Verify &amp; Gift</button>
+      <button class="tab" data-tab="leads"><span class="ti">📋</span>Leads</button>
+    </nav>
+  </section>
+
+  <!-- ================= MODAL ================= -->
+  <div id="modal" class="modal hidden">
+    <div class="modal-box">
+      <div id="modalBody"></div>
+      <div id="modalActions" class="btn-row"></div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast"></div>
+  <div id="loader" class="loader"><div class="spinner"></div></div>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>
