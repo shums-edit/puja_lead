@@ -402,6 +402,8 @@ regForm.onsubmit = async (e) => {
       });
       resetRegForm();
       window.scrollTo({ top: 0 });
+      loading(false);
+      $("#regSubmit").disabled = false;
       await modal(
         `<h3>Registered ✅</h3>
          <p><b>${esc(d.name)}</b> is registered. Tell the visitor this token for the Body Check.</p>
