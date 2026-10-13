@@ -28,6 +28,16 @@ service cloud.firestore {
          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['nextToken']));
     }
 
+    // Public "request access" form: anyone may create a request for a code
+    // that isn't already a club. Only owners can see / edit / approve / reject.
+    match /clubRequests/{reqId} {
+      allow create: if signedIn() &&
+        request.resource.data.uid == request.auth.uid &&
+        request.resource.data.code.lower() == reqId &&
+        !exists(/databases/$(database)/documents/clubs/$(reqId));
+      allow read, update, delete: if isOwner();
+    }
+
     // Club PINs: only owners can read or write
     match /clubSecrets/{clubId} {
       allow read, write: if isOwner();

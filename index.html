@@ -21,7 +21,7 @@
       <!-- Club login -->
       <form id="clubLoginForm" autocomplete="off">
         <label class="field">
-          <span>Select your club</span>
+          <span>Select your name</span>
           <select id="clubSelect"><option value="">Loading clubs…</option></select>
         </label>
         <label class="field">
@@ -52,7 +52,26 @@
         <button type="submit" id="loginBtn" class="btn btn-primary btn-block">Owner Login</button>
       </form>
 
-      <button type="button" id="switchLogin" class="link-btn">Owner login</button>
+      <!-- Club access request -->
+      <form id="requestForm" class="hidden" autocomplete="off" novalidate>
+        <p class="note">Fill this once. The owner will approve your request, then you can login.</p>
+        <label class="field"><span>Your Name (Club Owner) *</span>
+          <input name="rqName" type="text" /></label>
+        <label class="field"><span>Mobile No. *</span>
+          <input name="rqMobile" type="tel" inputmode="numeric" maxlength="10" placeholder="10-digit number" /></label>
+        <div class="row-2">
+          <label class="field"><span>Short Code * (for tokens)</span>
+            <input name="rqCode" type="text" maxlength="6" placeholder="e.g. RAHUL" /></label>
+          <label class="field"><span>Choose 4-digit PIN *</span>
+            <input name="rqPin" type="tel" inputmode="numeric" maxlength="4" placeholder="e.g. 4821" /></label>
+        </div>
+        <p id="requestError" class="error-text"></p>
+        <button type="submit" id="requestBtn" class="btn btn-primary btn-block">Create Request</button>
+      </form>
+
+      <button type="button" id="requestLink" class="link-btn">New club? Request access</button>
+      <button type="button" id="switchLogin" class="link-btn link-muted">Owner login</button>
+      <button type="button" id="backToClub" class="link-btn hidden">← Back to Club login</button>
     </div>
     <footer class="credit">Developed by <a href="https://sparkshums.netlify.app/" target="_blank" rel="noopener">Spark Shums</a></footer>
   </section>
@@ -137,7 +156,7 @@
               <span>Basic physical challenges (tick all that apply) *</span>
               <div class="checks" id="challengeList"></div>
             </div>
-            <label class="field hidden" id="otherWrap"><span>Other challenge *</span>
+            <label class="field hidden" id="otherWrap"><span>Write the other disease *</span>
               <input name="challengeOther" type="text" autocomplete="off" /></label>
           </div>
 
@@ -277,13 +296,18 @@
       <!-- ---------- CLUBS ---------- -->
       <section id="o-clubs" class="panel active">
         <div class="panel-head"><h2>Clubs</h2></div>
-        <form id="addClubForm" class="card" novalidate>
-          <h3 class="sec-title">Add New Club</h3>
-          <label class="field"><span>Club Name *</span>
-            <input name="clubName" type="text" autocomplete="off" placeholder="e.g. Salt Lake Wellness Club" /></label>
+        <div class="list-label" id="reqCount">Pending requests</div>
+        <div id="requestList" class="mini-list"></div>
+
+        <form id="addClubForm" class="card add-club" novalidate>
+          <h3 class="sec-title">Add Club Manually</h3>
+          <label class="field"><span>Club Owner's Name *</span>
+            <input name="clubName" type="text" autocomplete="off" placeholder="e.g. Rahul Sharma" /></label>
+          <label class="field"><span>Mobile No. *</span>
+            <input name="clubMobile" type="tel" inputmode="numeric" maxlength="10" autocomplete="off" placeholder="10-digit number" /></label>
           <div class="row-2">
             <label class="field"><span>Short Code * (for tokens)</span>
-              <input name="clubCode" type="text" autocomplete="off" maxlength="6" placeholder="e.g. SALT" /></label>
+              <input name="clubCode" type="text" autocomplete="off" maxlength="6" placeholder="e.g. RAHUL" /></label>
             <label class="field"><span>4-digit PIN *</span>
               <input name="clubPinNew" type="tel" inputmode="numeric" maxlength="4" autocomplete="off" placeholder="e.g. 4821" /></label>
           </div>

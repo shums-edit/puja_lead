@@ -316,3 +316,11 @@ input[type=range].untouched { opacity: .5; }
 .pin-eye { background: none; border: 0; padding: 2px; color: var(--muted); cursor: pointer; display: flex; }
 .danger-zone { border-color: #f1c6c2; background: #fffafa; margin-top: 24px; }
 .danger-zone h3 { margin: 0 0 4px; color: var(--red); font-size: 15px; }
+.link-btn.link-muted { color: var(--muted); font-weight: 500; }
+.row-btns { display: flex; gap: 6px; flex-wrap: wrap; }
+.btn-del { background: #fff; color: var(--red); border: 1.5px solid #f1c6c2; }
+.wa-btn { text-decoration: none; color: #128c4b; display: inline-flex; align-items: center; }
+.req-row { border-color: #efd68a; background: #fffdf5; }
+.add-club { margin-top: 18px; }
+.tab-dot { display: inline-block; background: var(--red); color: #fff; border-radius: 99px; font-size: 10px; padding: 0 6px; margin-left: 2px; }
+#loginScreen .login-card form + .link-btn { margin-top: 16px; }
