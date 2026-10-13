@@ -1,12 +1,12 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import {
-  getAuth, signInWithEmailAndPassword, onAuthStateChanged, signOut
+  getAuth, signInWithEmailAndPassword, onAuthStateChanged, signOut, createUserWithEmailAndPassword
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import {
-  getFirestore, collection, doc, onSnapshot, query, orderBy,
-  runTransaction, updateDoc, deleteDoc, serverTimestamp
+  getFirestore, collection, doc, getDoc, onSnapshot, query, where,
+  runTransaction, updateDoc, writeBatch, serverTimestamp
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
-import { firebaseConfig, CLUB_NAME, TOKEN_PREFIX } from "./firebase-config.js";
+import { firebaseConfig, OWNER_EMAILS, KEY_HASH, CLUB_EMAIL_DOMAIN } from "./firebase-config.js";
 
 /* ============================================================
    Helpers
@@ -15,13 +15,16 @@ const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) =>
   ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-const tokenStr = (n) => `${TOKEN_PREFIX}-${String(n).padStart(3, "0")}`;
+const tokenStr = (code, n) => `${code}-${String(n).padStart(3, "0")}`;
 const isPhone = (v) => /^[6-9]\d{9}$/.test(String(v || ""));
 const toDate = (ts) => (ts && ts.toDate ? ts.toDate() : null);
+const tsMs = (ts) => (toDate(ts)?.getTime() || 0);
 const fmtTime = (ts) => {
   const d = toDate(ts);
   return d ? d.toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }) : "—";
 };
+const clubPassword = (clubId, pin) => `PL#${clubId}#${pin}`;
+const ownerEmails = OWNER_EMAILS.map((e) => e.toLowerCase());
 
 function toast(msg, isErr = false) {
   const t = $("#toast");
@@ -29,11 +32,11 @@ function toast(msg, isErr = false) {
   t.classList.toggle("err", isErr);
   t.classList.add("show");
   clearTimeout(toast._t);
-  toast._t = setTimeout(() => t.classList.remove("show"), 2600);
+  toast._t = setTimeout(() => t.classList.remove("show"), 2800);
 }
 const loading = (on) => $("#loader").classList.toggle("show", on);
 
-/** Simple modal. buttons: [{label, cls, value}] → resolves with value */
+/** Modal. buttons: [{label, cls, value}] → resolves with value */
 function modal(html, buttons = [{ label: "OK", cls: "btn-primary", value: true }]) {
   return new Promise((resolve) => {
     $("#modalBody").innerHTML = html;
@@ -48,6 +51,7 @@ function modal(html, buttons = [{ label: "OK", cls: "btn-primary", value: true }
       act.appendChild(el);
     });
     $("#modal").classList.remove("hidden");
+    $("#modalBody input")?.focus();
   });
 }
 const confirmBox = (title, text, okLabel = "Yes", okCls = "btn-primary") =>
@@ -56,27 +60,69 @@ const confirmBox = (title, text, okLabel = "Yes", okCls = "btn-primary") =>
     { label: okLabel, cls: okCls, value: true },
   ]);
 
+async function sha256(text) {
+  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
+  return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+/** Ask for the 10-digit security key. Resolves true only if correct. */
+async function askKey(title, text) {
+  const ok = await modal(
+    `<h3>${title}</h3><p>${text}</p>
+     <label class="field"><span>10-digit security key</span>
+     <input type="password" id="keyInput" inputmode="numeric" maxlength="10" autocomplete="off" /></label>`,
+    [{ label: "Cancel", cls: "btn-light", value: false }, { label: "Delete Forever", cls: "btn-danger", value: true }]
+  );
+  if (!ok) return false;
+  const val = ($("#keyInput")?.value || "").trim();
+  if ((await sha256(val)) !== KEY_HASH) {
+    toast("Wrong security key. Nothing was deleted.", true);
+    return false;
+  }
+  return true;
+}
+
+// password show/hide buttons
+const EYE_OPEN = `<svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M12 5c-7 0-10 7-10 7s3 7 10 7 10-7 10-7-3-7-10-7zm0 11.5A4.5 4.5 0 1 1 12 7.5a4.5 4.5 0 0 1 0 9zm0-7a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5z"/></svg>`;
+const EYE_CLOSED = `<svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M2.1 3.5 3.5 2.1l18.4 18.4-1.4 1.4-3.2-3.2A11 11 0 0 1 12 19C5 19 2 12 2 12a17.6 17.6 0 0 1 4.2-5.4L2.1 3.5zM12 5c7 0 10 7 10 7a17.4 17.4 0 0 1-3.1 4.4l-3.5-3.5A4.5 4.5 0 0 0 10.1 7.6L7.9 5.4A11 11 0 0 1 12 5zm-4.4 6.4a4.5 4.5 0 0 0 5 5z"/></svg>`;
+$$(".pw-toggle").forEach((btn) => {
+  btn.innerHTML = EYE_OPEN;
+  btn.onclick = () => {
+    const inp = document.getElementById(btn.dataset.target);
+    const show = inp.type === "password";
+    inp.type = show ? "text" : "password";
+    btn.innerHTML = show ? EYE_CLOSED : EYE_OPEN;
+  };
+});
+
 /* ============================================================
    Firebase
    ============================================================ */
-const configMissing = !firebaseConfig.apiKey || firebaseConfig.apiKey.startsWith("PASTE");
-let app, auth, db;
-if (!configMissing) {
-  app = initializeApp(firebaseConfig);
-  auth = getAuth(app);
-  db = getFirestore(app);
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+let creatorAuth = null; // secondary auth used only to create club accounts
+function getCreatorAuth() {
+  if (!creatorAuth) creatorAuth = getAuth(initializeApp(firebaseConfig, "club-creator"));
+  return creatorAuth;
 }
 
 /* ============================================================
    State
    ============================================================ */
-let leads = [];
+let clubs = [];            // all clubs (public list)
+let mode = null;           // "club" | "owner"
+let myClub = null;         // {id, name, code}
+let leads = [];            // club's leads (incl. deleted)
 let unsubLeads = null;
-let editingId = null;
-let bodyId = null;
-let giftId = null;
+let editingId = null, bodyId = null, giftId = null;
 let energyTouched = false;
 let leadFilter = "all";
+
+let ownerLeads = [];
+let unsubOwner = null;
+let ownerSel = "ALL";
+let ownerTab = "clubs";
 
 const CHALLENGES = [
   "Joint / Knee Pain", "Back Pain", "Low Energy / Fatigue",
@@ -87,6 +133,7 @@ const CHALLENGES = [
    Status logic
    ============================================================ */
 const bodyDone = (l) => !!(l.height && l.weight && l.bmi && l.bmiCategory);
+const active = () => leads.filter((l) => !l.deleted);
 
 function missingItems(l) {
   const m = [];
@@ -113,11 +160,12 @@ function missingItems(l) {
 const isComplete = (l) => missingItems(l).length === 0;
 
 function matches(l, q) {
-  if (!q) return true;
+  if (!q || !q.trim()) return true;
   q = q.trim().toLowerCase();
+  const num = q.replace(/^\D+/, "").replace(/^0+/, "");
   return (
     (l.token || "").toLowerCase().includes(q) ||
-    String(l.tokenNo || "") === q.replace(/^\D+/, "").replace(/^0+/, "") ||
+    (num && String(l.tokenNo || "") === num) ||
     (l.name || "").toLowerCase().includes(q) ||
     (l.mobile || "").includes(q) ||
     (l.whatsapp || "").includes(q)
@@ -125,99 +173,167 @@ function matches(l, q) {
 }
 
 /* ============================================================
-   Auth
+   Screens & login
    ============================================================ */
 function showScreen(id) {
   $$(".screen").forEach((s) => s.classList.add("hidden"));
   $(id).classList.remove("hidden");
+  window.scrollTo({ top: 0 });
 }
 
-$("#pwToggle").onclick = () => {
-  const inp = $("#loginPassword");
-  const show = inp.type === "password";
-  inp.type = show ? "text" : "password";
-  $("#eyeOpen").classList.toggle("hidden", show);
-  $("#eyeClosed").classList.toggle("hidden", !show);
-  $("#pwToggle").setAttribute("aria-label", show ? "Hide password" : "Show password");
+// public club list (for dropdown + owner panel)
+onSnapshot(collection(db, "clubs"), (snap) => {
+  clubs = snap.docs.map((d) => ({ id: d.id, ...d.data() }))
+    .sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+  renderClubSelect();
+  if (mode === "owner") { renderClubList(); renderOwnerSelects(); renderOwnerStats(); }
+}, (err) => {
+  console.error(err);
+  $("#clubSelect").innerHTML = `<option value="">Could not load clubs</option>`;
+});
+
+function renderClubSelect() {
+  const sel = $("#clubSelect");
+  const prev = sel.value || localStorage.getItem("lastClub") || "";
+  sel.innerHTML = clubs.length
+    ? `<option value="">— Select your club —</option>` +
+      clubs.map((c) => `<option value="${esc(c.id)}">${esc(c.name)}</option>`).join("")
+    : `<option value="">No clubs added yet</option>`;
+  if (clubs.some((c) => c.id === prev)) sel.value = prev;
+}
+
+let ownerLoginMode = false;
+$("#switchLogin").onclick = () => {
+  ownerLoginMode = !ownerLoginMode;
+  $("#clubLoginForm").classList.toggle("hidden", ownerLoginMode);
+  $("#ownerLoginForm").classList.toggle("hidden", !ownerLoginMode);
+  $("#loginSub").textContent = ownerLoginMode ? "Owner Login" : "Club Login";
+  $("#switchLogin").textContent = ownerLoginMode ? "← Back to Club login" : "Owner login";
 };
 
-$("#loginForm").onsubmit = async (e) => {
+$("#clubPin").addEventListener("input", (e) => (e.target.value = e.target.value.replace(/\D/g, "").slice(0, 4)));
+
+$("#clubLoginForm").onsubmit = async (e) => {
   e.preventDefault();
-  if (configMissing) return;
+  const err = $("#clubLoginError");
+  err.textContent = "";
+  const club = clubs.find((c) => c.id === $("#clubSelect").value);
+  const pin = $("#clubPin").value.trim();
+  if (!club) return (err.textContent = "Select your club.");
+  if (!/^\d{4}$/.test(pin)) return (err.textContent = "Enter the 4-digit PIN.");
+  $("#clubLoginBtn").disabled = true;
+  try {
+    await signInWithEmailAndPassword(auth, club.authEmail, clubPassword(club.id, pin));
+    try { localStorage.setItem("lastClub", club.id); } catch (_) {}
+    $("#clubPin").value = "";
+  } catch (ex) {
+    const c = ex.code || "";
+    err.textContent = c.includes("too-many-requests")
+      ? "Too many wrong attempts. Wait a few minutes."
+      : c.includes("network") ? "No internet connection." : "Wrong PIN for this club.";
+  } finally {
+    $("#clubLoginBtn").disabled = false;
+  }
+};
+
+$("#ownerLoginForm").onsubmit = async (e) => {
+  e.preventDefault();
   $("#loginError").textContent = "";
   $("#loginBtn").disabled = true;
   try {
     await signInWithEmailAndPassword(auth, $("#loginEmail").value.trim(), $("#loginPassword").value);
-  } catch (err) {
-    const code = err.code || "";
-    $("#loginError").textContent =
-      code.includes("invalid-credential") || code.includes("wrong-password") || code.includes("user-not-found")
-        ? "Wrong email or password."
-        : code.includes("too-many-requests")
-          ? "Too many attempts. Wait a minute and try again."
-          : code.includes("network")
-            ? "No internet connection."
-            : "Login failed. Please try again.";
+    $("#loginPassword").value = "";
+  } catch (ex) {
+    const c = ex.code || "";
+    $("#loginError").textContent = c.includes("too-many-requests")
+      ? "Too many attempts. Wait a minute and try again."
+      : c.includes("network") ? "No internet connection." : "Wrong email or password.";
   } finally {
     $("#loginBtn").disabled = false;
   }
 };
 
-$("#logoutBtn").onclick = async () => {
-  if (await confirmBox("Logout?", "You will need to login again to continue.", "Logout", "btn-danger")) {
-    signOut(auth);
-  }
+const doLogout = async () => {
+  if (await confirmBox("Logout?", "You will need to login again to continue.", "Logout", "btn-danger")) signOut(auth);
 };
+$("#logoutBtn").onclick = doLogout;
+$("#ownerLogoutBtn").onclick = doLogout;
 
-if (configMissing) {
-  showScreen("#loginScreen");
-  $("#setupWarning").classList.remove("hidden");
-  $("#loginBtn").disabled = true;
-} else {
-  onAuthStateChanged(auth, (user) => {
-    if (user) {
-      showScreen("#appScreen");
-      startLeads();
+function stopListeners() {
+  if (unsubLeads) { unsubLeads(); unsubLeads = null; }
+  if (unsubOwner) { unsubOwner(); unsubOwner = null; }
+  leads = []; ownerLeads = []; myClub = null; mode = null;
+}
+
+onAuthStateChanged(auth, async (user) => {
+  stopListeners();
+  if (!user) { showScreen("#loginScreen"); return; }
+
+  if (ownerEmails.includes((user.email || "").toLowerCase())) {
+    mode = "owner";
+    showScreen("#ownerScreen");
+    renderClubList(); renderOwnerSelects();
+    startOwnerLeads();
+    return;
+  }
+
+  // club account → find its club
+  try {
+    const m = await getDoc(doc(db, "members", user.uid));
+    if (!m.exists()) throw new Error("no-member");
+    const c = await getDoc(doc(db, "clubs", m.data().clubId));
+    if (!c.exists()) throw new Error("no-club");
+    myClub = { id: c.id, ...c.data() };
+    mode = "club";
+    $("#clubTitle").textContent = myClub.name;
+    resetRegForm();
+    openTab("register");
+    showScreen("#appScreen");
+    startClubLeads();
+  } catch (ex) {
+    console.error(ex);
+    await signOut(auth);
+    $("#clubLoginError").textContent = "This club login is not active. Ask the owner for the current PIN.";
+  }
+});
+
+/* ============================================================
+   CLUB: live leads
+   ============================================================ */
+function startClubLeads() {
+  const q = query(collection(db, "leads"), where("clubId", "==", myClub.id));
+  unsubLeads = onSnapshot(q, (snap) => {
+    leads = snap.docs.map((d) => ({ id: d.id, ...d.data() }))
+      .sort((a, b) => (b.tokenNo || 0) - (a.tokenNo || 0));
+    renderAll();
+  }, async (err) => {
+    console.error(err);
+    if (err.code === "permission-denied") {
+      await signOut(auth);
+      $("#clubLoginError").textContent = "PIN was changed. Login again with the new PIN.";
     } else {
-      if (unsubLeads) { unsubLeads(); unsubLeads = null; }
-      leads = [];
-      showScreen("#loginScreen");
+      toast("Could not load data. Check internet.", true);
     }
   });
 }
 
-function startLeads() {
-  if (unsubLeads) return;
-  const q = query(collection(db, "leads"), orderBy("tokenNo", "desc"));
-  unsubLeads = onSnapshot(q, (snap) => {
-    leads = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-    renderAll();
-  }, (err) => {
-    console.error(err);
-    toast("Could not load data. Check internet / Firestore rules.", true);
-  });
-}
-
 /* ============================================================
-   Tabs
+   CLUB: tabs
    ============================================================ */
 function openTab(name) {
-  $$(".tab").forEach((t) => t.classList.toggle("active", t.dataset.tab === name));
-  $$(".panel").forEach((p) => p.classList.toggle("active", p.id === `tab-${name}`));
+  $$("#appScreen .tab").forEach((t) => t.classList.toggle("active", t.dataset.tab === name));
+  $$("#appScreen .panel").forEach((p) => p.classList.toggle("active", p.id === `tab-${name}`));
   window.scrollTo({ top: 0 });
 }
-$$(".tab").forEach((t) => (t.onclick = () => openTab(t.dataset.tab)));
+$$("#appScreen .tab").forEach((t) => (t.onclick = () => openTab(t.dataset.tab)));
 
 /* ============================================================
-   REGISTER form
+   CLUB: register form
    ============================================================ */
 const regForm = $("#regForm");
 
-// build 1–10 rating
 $("#healthRating").innerHTML = Array.from({ length: 10 }, (_, i) =>
   `<label><input type="radio" name="healthRating" value="${i + 1}"><i>${i + 1}</i></label>`).join("");
-
-// build challenges
 $("#challengeList").innerHTML = CHALLENGES.map((c) =>
   `<label><input type="checkbox" name="challenge" value="${c}"> ${c}</label>`).join("");
 
@@ -225,7 +341,7 @@ $("#challengeList").addEventListener("change", (e) => {
   const box = e.target;
   if (box.name !== "challenge") return;
   if (box.value === "None" && box.checked) {
-    $$('input[name=challenge]').forEach((c) => { if (c.value !== "None") c.checked = false; });
+    $$("input[name=challenge]").forEach((c) => { if (c.value !== "None") c.checked = false; });
   } else if (box.checked) {
     $('input[name=challenge][value="None"]').checked = false;
   }
@@ -233,15 +349,11 @@ $("#challengeList").addEventListener("change", (e) => {
   $("#challengeList").classList.remove("invalid-group");
 });
 
-// medication yes → details
 regForm.addEventListener("change", (e) => {
-  if (e.target.name === "onMedication") {
-    $("#medDetailsWrap").classList.toggle("hidden", e.target.value !== "Yes");
-  }
+  if (e.target.name === "onMedication") $("#medDetailsWrap").classList.toggle("hidden", e.target.value !== "Yes");
   if (e.target.type === "radio") e.target.closest(".seg, .rating")?.classList.remove("invalid-group");
 });
 
-// digits only for phone fields
 ["mobile", "whatsapp"].forEach((n) => {
   regForm[n].addEventListener("input", () => {
     regForm[n].value = regForm[n].value.replace(/\D/g, "").slice(0, 10);
@@ -253,17 +365,15 @@ $("#sameAsMobile").onchange = (e) => {
   if (e.target.checked) regForm.whatsapp.value = regForm.mobile.value;
 };
 
-// energy slider
 function setEnergyUI(touched) {
   energyTouched = touched;
-  $("#energy").closest(".slider-wrap").classList.remove("invalid-group");
   const s = $("#energy"), out = $("#energyOut");
+  s.closest(".slider-wrap").classList.remove("invalid-group");
   s.classList.toggle("untouched", !touched);
   out.classList.toggle("unset", !touched);
   out.textContent = touched ? `${s.value} / 10` : "Drag to set";
 }
 $("#energy").addEventListener("input", () => setEnergyUI(true));
-
 regForm.addEventListener("input", (e) => e.target.classList?.remove("invalid"));
 
 function readRegForm() {
@@ -362,8 +472,7 @@ regForm.onsubmit = async (e) => {
   const d = readRegForm();
   if (!validateReg(d)) return;
 
-  // duplicate mobile check
-  const dup = leads.find((l) => l.mobile === d.mobile && l.id !== editingId);
+  const dup = active().find((l) => l.mobile === d.mobile && l.id !== editingId);
   if (dup) {
     const go = await confirmBox("Mobile already registered",
       `<b>${esc(d.mobile)}</b> is already registered as <b>${esc(dup.token)} – ${esc(dup.name)}</b>.<br><br>Register again anyway?`,
@@ -374,29 +483,27 @@ regForm.onsubmit = async (e) => {
   loading(true);
   $("#regSubmit").disabled = true;
   try {
-    const user = auth.currentUser?.email || "";
     if (editingId) {
-      await updateDoc(doc(db, "leads", editingId), { ...d, updatedAt: serverTimestamp(), updatedBy: user });
+      await updateDoc(doc(db, "leads", editingId), { ...d, updatedAt: serverTimestamp(), updatedBy: myClub.name });
       const l = leads.find((x) => x.id === editingId);
       toast(`${l?.token || "Entry"} updated`);
       resetRegForm();
       openTab("leads");
     } else {
-      const counterRef = doc(db, "meta", "counter");
+      const clubRef = doc(db, "clubs", myClub.id);
       const leadRef = doc(collection(db, "leads"));
+      const code = myClub.code;
       const tokenNo = await runTransaction(db, async (tx) => {
-        const snap = await tx.get(counterRef);
-        const next = snap.exists() ? (snap.data().next || 1) : 1;
-        tx.set(counterRef, { next: next + 1 });
+        const snap = await tx.get(clubRef);
+        const next = snap.data()?.nextToken || 1;
+        tx.update(clubRef, { nextToken: next + 1 });
         tx.set(leadRef, {
           ...d,
-          tokenNo: next,
-          token: tokenStr(next),
+          clubId: myClub.id, clubName: myClub.name, clubCode: code,
+          tokenNo: next, token: tokenStr(code, next),
           height: "", heightUnit: "cm", weight: "", bmi: "", bmiCategory: "",
-          giftGiven: false,
-          followUpDone: false,
-          createdAt: serverTimestamp(),
-          createdBy: user,
+          giftGiven: false, followUpDone: false, deleted: false,
+          createdAt: serverTimestamp(), createdBy: myClub.name,
         });
         return next;
       });
@@ -407,7 +514,7 @@ regForm.onsubmit = async (e) => {
       await modal(
         `<h3>Registered ✅</h3>
          <p><b>${esc(d.name)}</b> is registered. Tell the visitor this token for the Body Check.</p>
-         <div class="token-big">${tokenStr(tokenNo)}</div>`,
+         <div class="token-big">${tokenStr(code, tokenNo)}</div>`,
         [{ label: "Next Registration", cls: "btn-primary", value: true }]
       );
     }
@@ -421,7 +528,7 @@ regForm.onsubmit = async (e) => {
 };
 
 /* ============================================================
-   BODY CHECK
+   CLUB: body check
    ============================================================ */
 const bodyForm = $("#bodyForm");
 
@@ -437,10 +544,10 @@ function renderBodyList() {
   const q = $("#bodySearch").value;
   let list;
   if (q.trim()) {
-    list = leads.filter((l) => matches(l, q));
+    list = active().filter((l) => matches(l, q));
     $("#bodyListLabel").textContent = `Search results (${list.length})`;
   } else {
-    list = leads.filter((l) => !bodyDone(l)).slice().reverse(); // oldest waiting first
+    list = active().filter((l) => !bodyDone(l)).reverse();
     $("#bodyListLabel").textContent = `Waiting for body check (${list.length})`;
   }
   $("#bodyList").innerHTML = list.length
@@ -507,9 +614,7 @@ bodyForm.onsubmit = async (e) => {
 
   loading(true);
   try {
-    await updateDoc(doc(db, "leads", bodyId), {
-      ...d, bodyCheckAt: serverTimestamp(), bodyCheckBy: auth.currentUser?.email || "",
-    });
+    await updateDoc(doc(db, "leads", bodyId), { ...d, bodyCheckAt: serverTimestamp() });
     const l = leads.find((x) => x.id === bodyId);
     toast(`Body check saved for ${l?.token || ""}`);
     closeBody();
@@ -522,16 +627,16 @@ bodyForm.onsubmit = async (e) => {
 };
 
 /* ============================================================
-   VERIFY & GIFT
+   CLUB: verify & gift
    ============================================================ */
 function renderGiftList() {
   const q = $("#giftSearch").value;
   let list;
   if (q.trim()) {
-    list = leads.filter((l) => matches(l, q));
+    list = active().filter((l) => matches(l, q));
     $("#giftListLabel").textContent = `Search results (${list.length})`;
   } else {
-    list = leads.filter((l) => !l.giftGiven).slice().reverse();
+    list = active().filter((l) => !l.giftGiven).reverse();
     $("#giftListLabel").textContent = `Gift not given yet (${list.length})`;
   }
   const badge = (l) => l.giftGiven
@@ -547,12 +652,13 @@ $("#giftList").addEventListener("click", (e) => {
   if (b) openGift(b.dataset.id);
 });
 
-function detailTable(l) {
+function detailTable(l, showClub = false) {
   const row = (k, v) => `<tr><td>${k}</td><td>${v === "" || v == null ? "<span style='color:#b42318'>—</span>" : esc(v)}</td></tr>`;
   const sec = (t) => `<tr class="sec"><td colspan="2">${t}</td></tr>`;
   const ch = (l.challenges || []).map((c) => (c === "Other" && l.challengeOther ? `Other: ${l.challengeOther}` : c)).join(", ");
   return `<table class="detail-table">
     ${sec("1. Contact Information")}
+    ${showClub ? row("Club", l.clubName) : ""}
     ${row("Token", l.token)}
     ${row("Full Name", l.name)}
     ${row("Age", l.age)}
@@ -578,6 +684,7 @@ function detailTable(l) {
     ${row("Registered", fmtTime(l.createdAt))}
     ${row("Body check", fmtTime(l.bodyCheckAt))}
     ${row("Gift", l.giftGiven ? `Given · ${fmtTime(l.giftAt)}` : "Not given")}
+    ${l.deleted ? row("In Recycle Bin since", fmtTime(l.deletedAt)) : ""}
   </table>`;
 }
 
@@ -596,7 +703,6 @@ function paintGift(l) {
   if (l.giftGiven) status = `<div class="all-good">🎁 Gift already given · ${fmtTime(l.giftAt)}</div>`;
   else if (miss.length) status = `<div class="missing"><b>Incomplete. Do not give the gift.</b> Missing:<ul>${miss.map((m) => `<li>${esc(m)}</li>`).join("")}</ul></div>`;
   else status = `<div class="all-good">✅ All details complete. Verify mobile number with the visitor, then give the gift.</div>`;
-
   $("#giftDetails").innerHTML = `<div class="card">${detailTable(l)}${status}</div>`;
   const btn = $("#giftBtn");
   btn.disabled = l.giftGiven || miss.length > 0;
@@ -618,9 +724,7 @@ $("#giftBtn").onclick = async () => {
   if (!ok) return;
   loading(true);
   try {
-    await updateDoc(doc(db, "leads", l.id), {
-      giftGiven: true, giftAt: serverTimestamp(), giftBy: auth.currentUser?.email || "",
-    });
+    await updateDoc(doc(db, "leads", l.id), { giftGiven: true, giftAt: serverTimestamp() });
     toast(`🎁 Gift marked for ${l.token}`);
     closeGift();
   } catch (err) {
@@ -632,13 +736,13 @@ $("#giftBtn").onclick = async () => {
 };
 
 /* ============================================================
-   LEADS
+   CLUB: leads list + recycle bin
    ============================================================ */
 $("#leadFilters").addEventListener("click", (e) => {
   const c = e.target.closest(".chip");
   if (!c) return;
   leadFilter = c.dataset.f;
-  $$(".chip").forEach((x) => x.classList.toggle("active", x === c));
+  $$("#leadFilters .chip").forEach((x) => x.classList.toggle("active", x === c));
   renderLeads();
 });
 $("#leadSearch").addEventListener("input", renderLeads);
@@ -647,6 +751,8 @@ function filteredLeads() {
   const q = $("#leadSearch").value;
   return leads.filter((l) => {
     if (!matches(l, q)) return false;
+    if (leadFilter === "bin") return !!l.deleted;
+    if (l.deleted) return false;
     if (leadFilter === "followup") return !l.followUpDone;
     if (leadFilter === "consult") return l.wantsConsultation === "Yes";
     if (leadFilter === "income") return l.incomeInterest === "Yes";
@@ -655,33 +761,47 @@ function filteredLeads() {
   });
 }
 
+function badges(l) {
+  const b = [];
+  b.push(bodyDone(l) ? `<span class="badge b-ok">Body ✓</span>` : `<span class="badge b-warn">Body pending</span>`);
+  b.push(l.giftGiven ? `<span class="badge b-ok">Gift ✓</span>` : `<span class="badge b-warn">No gift</span>`);
+  if (l.wantsConsultation === "Yes") b.push(`<span class="badge b-ok">Consultation</span>`);
+  if (l.incomeInterest === "Yes") b.push(`<span class="badge b-ok">Income</span>`);
+  return b.join("");
+}
+
 function renderLeads() {
+  const inBin = leadFilter === "bin";
   const list = filteredLeads();
-  $("#leadCount").textContent = `${list.length} lead${list.length === 1 ? "" : "s"}`;
-  $("#leadList").innerHTML = list.length ? list.map((l) => {
-    const b = [];
-    b.push(bodyDone(l) ? `<span class="badge b-ok">Body ✓</span>` : `<span class="badge b-warn">Body pending</span>`);
-    b.push(l.giftGiven ? `<span class="badge b-ok">Gift ✓</span>` : `<span class="badge b-warn">No gift</span>`);
-    if (l.wantsConsultation === "Yes") b.push(`<span class="badge b-ok">Consultation</span>`);
-    if (l.incomeInterest === "Yes") b.push(`<span class="badge b-ok">Income</span>`);
-    return `<div class="lead-card" data-id="${l.id}">
+  const binCount = leads.filter((l) => l.deleted).length;
+  $("#leadFilters .chip-bin").textContent = `🗑 Recycle Bin (${binCount})`;
+  $("#leadsTitle").textContent = inBin ? "Recycle Bin" : "Leads";
+  $("#leadCount").textContent = inBin
+    ? `${list.length} deleted lead${list.length === 1 ? "" : "s"} · restore any by tapping Restore`
+    : `${list.length} lead${list.length === 1 ? "" : "s"}`;
+  $("#leadList").innerHTML = list.length ? list.map((l) => `
+    <div class="lead-card${inBin ? " in-bin" : ""}" data-id="${l.id}">
       <div class="lc-top"><span class="token">${esc(l.token)}</span><span class="nm">${esc(l.name)}</span></div>
       <div class="lc-sub">Age ${esc(l.age)} · ${esc(l.occupation)} · ${esc(l.mobile)} · ${fmtTime(l.createdAt)}</div>
-      <div class="lc-badges">${b.join("")}</div>
+      <div class="lc-badges">${badges(l)}</div>
       <div class="lc-actions">
-        <a href="tel:${esc(l.mobile)}">📞 Call</a>
-        <a class="wa" href="https://wa.me/91${esc(l.whatsapp)}" target="_blank" rel="noopener">WhatsApp</a>
-        <button type="button" class="view" data-act="view">View</button>
-        <label class="fu"><input type="checkbox" data-act="fu" ${l.followUpDone ? "checked" : ""}> Follow-up done</label>
+        ${inBin
+          ? `<button type="button" data-act="view">View</button>
+             <button type="button" class="restore" data-act="restore">↩ Restore</button>`
+          : `<a href="tel:${esc(l.mobile)}">📞 Call</a>
+             <a class="wa" href="https://wa.me/91${esc(l.whatsapp)}" target="_blank" rel="noopener">WhatsApp</a>
+             <button type="button" data-act="view">View</button>
+             <label class="fu"><input type="checkbox" data-act="fu" ${l.followUpDone ? "checked" : ""}> Follow-up done</label>`}
       </div>
-    </div>`;
-  }).join("") : `<div class="empty">No leads found.</div>`;
+    </div>`).join("") : `<div class="empty">${inBin ? "Recycle Bin is empty." : "No leads found."}</div>`;
 }
 
 $("#leadList").addEventListener("click", (e) => {
   const card = e.target.closest(".lead-card");
   if (!card) return;
-  if (e.target.dataset.act === "view") openDetail(card.dataset.id);
+  const act = e.target.dataset.act;
+  if (act === "view") openDetail(card.dataset.id);
+  if (act === "restore") restoreLead(card.dataset.id);
 });
 $("#leadList").addEventListener("change", async (e) => {
   if (e.target.dataset.act !== "fu") return;
@@ -695,34 +815,54 @@ $("#leadList").addEventListener("change", async (e) => {
   }
 });
 
-async function openDetail(id) {
-  const l = leads.find((x) => x.id === id);
+async function moveToBin(l, by) {
+  const ok = await confirmBox("Move to Recycle Bin?",
+    `<b>${esc(l.token)} – ${esc(l.name)}</b> will be moved to the Recycle Bin. You can restore it later.`,
+    "Move to Bin", "btn-danger");
+  if (!ok) return;
+  try {
+    await updateDoc(doc(db, "leads", l.id), { deleted: true, deletedAt: serverTimestamp(), deletedBy: by });
+    toast(`${l.token} moved to Recycle Bin`);
+  } catch (err) {
+    console.error(err);
+    toast("Could not delete. Check internet.", true);
+  }
+}
+async function restoreLead(id, list = leads) {
+  const l = list.find((x) => x.id === id);
   if (!l) return;
-  const act = await modal(`<h3>${esc(l.token)} – ${esc(l.name)}</h3>${detailTable(l)}`, [
-    { label: "Delete", cls: "btn-danger", value: "del" },
-    { label: "Edit Form", cls: "btn-light", value: "edit" },
-    { label: "Body Check", cls: "btn-light", value: "body" },
-    { label: "Close", cls: "btn-primary", value: null },
-  ]);
-  if (act === "edit") fillRegForm(l);
-  else if (act === "body") openBody(l.id);
-  else if (act === "del") {
-    const ok = await confirmBox("Delete entry?", `Permanently delete <b>${esc(l.token)} – ${esc(l.name)}</b>? This cannot be undone.`, "Delete", "btn-danger");
-    if (!ok) return;
-    try {
-      await deleteDoc(doc(db, "leads", l.id));
-      toast(`${l.token} deleted`);
-    } catch (err) {
-      toast("Delete failed. Check internet.", true);
-    }
+  try {
+    await updateDoc(doc(db, "leads", id), { deleted: false, restoredAt: serverTimestamp() });
+    toast(`${l.token} restored`);
+  } catch (err) {
+    console.error(err);
+    toast("Could not restore. Check internet.", true);
   }
 }
 
-/* CSV export */
-$("#exportBtn").onclick = () => {
-  const list = filteredLeads().slice().reverse();
+async function openDetail(id) {
+  const l = leads.find((x) => x.id === id);
+  if (!l) return;
+  const buttons = l.deleted
+    ? [{ label: "↩ Restore", cls: "btn-primary", value: "restore" }, { label: "Close", cls: "btn-light", value: null }]
+    : [
+        { label: "🗑 Delete", cls: "btn-danger", value: "del" },
+        { label: "Edit Form", cls: "btn-light", value: "edit" },
+        { label: "Body Check", cls: "btn-light", value: "body" },
+        { label: "Close", cls: "btn-primary", value: null },
+      ];
+  const act = await modal(`<h3>${esc(l.token)} – ${esc(l.name)}</h3>${detailTable(l)}`, buttons);
+  if (act === "edit") fillRegForm(l);
+  else if (act === "body") openBody(l.id);
+  else if (act === "del") moveToBin(l, myClub.name);
+  else if (act === "restore") restoreLead(l.id);
+}
+
+/* CSV export (shared) */
+function exportCSV(list, filename, withClub) {
   if (!list.length) return toast("Nothing to export", true);
   const cols = [
+    ...(withClub ? [["Club", (l) => l.clubName]] : []),
     ["Token", (l) => l.token], ["Full Name", (l) => l.name], ["Age", (l) => l.age],
     ["Mobile", (l) => l.mobile], ["WhatsApp", (l) => l.whatsapp], ["Occupation", (l) => l.occupation],
     ["Health Goal", (l) => l.healthGoal], ["Health Rating (1-10)", (l) => l.healthRating],
@@ -733,31 +873,33 @@ $("#exportBtn").onclick = () => {
     ["BMI", (l) => l.bmi], ["BMI Category", (l) => l.bmiCategory],
     ["Wellness Consultation", (l) => l.wantsConsultation], ["Income Opportunity", (l) => l.incomeInterest],
     ["Gift Given", (l) => (l.giftGiven ? "Yes" : "No")], ["Follow-up Done", (l) => (l.followUpDone ? "Yes" : "No")],
-    ["Registered At", (l) => fmtTime(l.createdAt)], ["Registered By", (l) => l.createdBy],
+    ["Registered At", (l) => fmtTime(l.createdAt)],
   ];
   const cell = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
   const csv = [cols.map((c) => cell(c[0])).join(","),
     ...list.map((l) => cols.map((c) => cell(c[1](l))).join(","))].join("\r\n");
-  const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8" });
+  const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8" });
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
-  a.download = `puja-leads-${new Date().toISOString().slice(0, 10)}.csv`;
+  a.download = `${filename}-${new Date().toISOString().slice(0, 10)}.csv`;
   document.body.appendChild(a);
   a.click();
   a.remove();
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);
   toast(`Exported ${list.length} leads`);
+}
+$("#exportBtn").onclick = () => {
+  const list = filteredLeads().slice().reverse();
+  exportCSV(list, `${myClub.code}-leads`, false);
 };
 
-/* ============================================================
-   Render all
-   ============================================================ */
 function renderStats() {
+  const a = active();
   const today = new Date().toDateString();
-  $("#statToday").textContent = leads.filter((l) => toDate(l.createdAt)?.toDateString() === today).length;
-  $("#statTotal").textContent = leads.length;
-  $("#statBody").textContent = leads.filter(bodyDone).length;
-  $("#statGift").textContent = leads.filter((l) => l.giftGiven).length;
+  $("#statToday").textContent = a.filter((l) => toDate(l.createdAt)?.toDateString() === today).length;
+  $("#statTotal").textContent = a.length;
+  $("#statBody").textContent = a.filter(bodyDone).length;
+  $("#statGift").textContent = a.filter((l) => l.giftGiven).length;
 }
 
 function renderAll() {
@@ -765,13 +907,277 @@ function renderAll() {
   renderBodyList();
   renderGiftList();
   renderLeads();
-  // keep open gift view live (e.g. body check saved on another phone)
   if (giftId) {
     const l = leads.find((x) => x.id === giftId);
-    if (l) paintGift(l); else closeGift();
+    if (l && !l.deleted) paintGift(l); else closeGift();
   }
-  if (bodyId && !leads.find((x) => x.id === bodyId)) closeBody();
+  if (bodyId) {
+    const l = leads.find((x) => x.id === bodyId);
+    if (!l || l.deleted) closeBody();
+  }
 }
 
-document.title = `Wellness Campaign – ${CLUB_NAME}`;
+/* ============================================================
+   OWNER PANEL
+   ============================================================ */
+function openOwnerTab(name) {
+  ownerTab = name;
+  $$("#ownerScreen .tab").forEach((t) => t.classList.toggle("active", t.dataset.otab === name));
+  $$("#ownerScreen .panel").forEach((p) => p.classList.toggle("active", p.id === `o-${name}`));
+  window.scrollTo({ top: 0 });
+}
+$$("#ownerScreen .tab").forEach((t) => (t.onclick = () => openOwnerTab(t.dataset.otab)));
+
+function startOwnerLeads() {
+  if (unsubOwner) { unsubOwner(); unsubOwner = null; }
+  ownerLeads = [];
+  renderOwner();
+  const base = collection(db, "leads");
+  const q = ownerSel === "ALL" ? base : query(base, where("clubId", "==", ownerSel));
+  unsubOwner = onSnapshot(q, (snap) => {
+    ownerLeads = snap.docs.map((d) => ({ id: d.id, ...d.data() }))
+      .sort((a, b) => tsMs(b.createdAt) - tsMs(a.createdAt));
+    renderOwner();
+  }, (err) => {
+    console.error(err);
+    toast("Could not load leads. Check internet / rules.", true);
+  });
+}
+
+function renderOwnerSelects() {
+  const opts = `<option value="ALL">All clubs</option>` +
+    clubs.map((c) => `<option value="${esc(c.id)}">${esc(c.name)} (${esc(c.code)})</option>`).join("");
+  ["#oClubSel", "#oBinClubSel"].forEach((s) => {
+    $(s).innerHTML = opts;
+    $(s).value = clubs.some((c) => c.id === ownerSel) ? ownerSel : "ALL";
+  });
+}
+["#oClubSel", "#oBinClubSel"].forEach((s) => {
+  $(s).addEventListener("change", (e) => {
+    ownerSel = e.target.value;
+    $("#oClubSel").value = ownerSel;
+    $("#oBinClubSel").value = ownerSel;
+    startOwnerLeads();
+  });
+});
+$("#oLeadSearch").addEventListener("input", renderOwnerLeads);
+$("#oBinSearch").addEventListener("input", renderOwnerBin);
+
+function renderOwnerStats() {
+  const a = ownerLeads.filter((l) => !l.deleted);
+  $("#oStatClubs").textContent = clubs.length;
+  $("#oStatLeads").textContent = a.length;
+  $("#oStatBody").textContent = a.filter(bodyDone).length;
+  $("#oStatGift").textContent = a.filter((l) => l.giftGiven).length;
+}
+
+function renderOwner() {
+  renderOwnerStats();
+  renderOwnerLeads();
+  renderOwnerBin();
+}
+
+function ownerCard(l, inBin) {
+  return `<div class="lead-card${inBin ? " in-bin" : ""}" data-id="${l.id}">
+    <div class="lc-top"><span class="token">${esc(l.token)}</span><span class="nm">${esc(l.name)}</span></div>
+    <div class="lc-sub"><b>${esc(l.clubName)}</b> · ${esc(l.mobile)} · ${fmtTime(inBin ? l.deletedAt : l.createdAt)}</div>
+    <div class="lc-badges">${badges(l)}</div>
+    <div class="lc-actions">
+      ${inBin
+        ? `<button type="button" data-act="view">View</button>
+           <button type="button" class="restore" data-act="restore">↩ Restore</button>
+           <button type="button" class="danger" data-act="purge">Delete Forever</button>`
+        : `<a href="tel:${esc(l.mobile)}">📞 Call</a>
+           <a class="wa" href="https://wa.me/91${esc(l.whatsapp)}" target="_blank" rel="noopener">WhatsApp</a>
+           <button type="button" data-act="view">View</button>`}
+    </div>
+  </div>`;
+}
+
+const ownerActive = () => ownerLeads.filter((l) => !l.deleted && matches(l, $("#oLeadSearch").value));
+const ownerBinned = () => ownerLeads.filter((l) => l.deleted && matches(l, $("#oBinSearch").value));
+
+function renderOwnerLeads() {
+  const list = ownerActive();
+  $("#oLeadCount").textContent = `${list.length} lead${list.length === 1 ? "" : "s"}`;
+  $("#oLeadList").innerHTML = list.length
+    ? list.slice(0, 300).map((l) => ownerCard(l, false)).join("") +
+      (list.length > 300 ? `<div class="empty">Showing first 300. Use search or pick a club, or Export CSV for all.</div>` : "")
+    : `<div class="empty">No leads yet.</div>`;
+}
+function renderOwnerBin() {
+  const list = ownerBinned();
+  $("#oBinCount").textContent = `${list.length} deleted lead${list.length === 1 ? "" : "s"}`;
+  $("#oPurgeAll").disabled = !list.length;
+  $("#oBinList").innerHTML = list.length
+    ? list.map((l) => ownerCard(l, true)).join("")
+    : `<div class="empty">Recycle Bin is empty.</div>`;
+}
+
+async function ownerListClick(e) {
+  const card = e.target.closest(".lead-card");
+  if (!card) return;
+  const l = ownerLeads.find((x) => x.id === card.dataset.id);
+  if (!l) return;
+  const act = e.target.dataset.act;
+  if (act === "view") {
+    const buttons = l.deleted
+      ? [{ label: "↩ Restore", cls: "btn-primary", value: "restore" },
+         { label: "Delete Forever", cls: "btn-danger", value: "purge" },
+         { label: "Close", cls: "btn-light", value: null }]
+      : [{ label: "🗑 Move to Bin", cls: "btn-danger", value: "bin" },
+         { label: "Close", cls: "btn-primary", value: null }];
+    const r = await modal(`<h3>${esc(l.token)} – ${esc(l.name)}</h3>${detailTable(l, true)}`, buttons);
+    if (r === "restore") restoreLead(l.id, ownerLeads);
+    if (r === "purge") purge([l]);
+    if (r === "bin") moveToBin(l, "Owner");
+  }
+  if (act === "restore") restoreLead(l.id, ownerLeads);
+  if (act === "purge") purge([l]);
+}
+$("#oLeadList").addEventListener("click", ownerListClick);
+$("#oBinList").addEventListener("click", ownerListClick);
+
+async function purge(list) {
+  if (!list.length) return;
+  const label = list.length === 1 ? `<b>${esc(list[0].token)} – ${esc(list[0].name)}</b>` : `<b>${list.length} leads</b>`;
+  const ok = await askKey("Delete forever?", `${label} will be permanently deleted. This cannot be undone.`);
+  if (!ok) return;
+  loading(true);
+  try {
+    for (let i = 0; i < list.length; i += 400) {
+      const batch = writeBatch(db);
+      list.slice(i, i + 400).forEach((l) => batch.delete(doc(db, "leads", l.id)));
+      await batch.commit();
+    }
+    toast(`Permanently deleted ${list.length} lead${list.length === 1 ? "" : "s"}`);
+  } catch (err) {
+    console.error(err);
+    toast("Delete failed. Check internet.", true);
+  } finally {
+    loading(false);
+  }
+}
+$("#oPurgeAll").onclick = () => purge(ownerBinned());
+
+$("#oExportBtn").onclick = () => {
+  const c = clubs.find((x) => x.id === ownerSel);
+  exportCSV(ownerActive().slice().reverse(), c ? `${c.code}-leads` : "all-clubs-leads", true);
+};
+
+/* ---------- Clubs management ---------- */
+function renderClubList() {
+  $("#clubCount").textContent = `${clubs.length} club${clubs.length === 1 ? "" : "s"}`;
+  $("#clubList").innerHTML = clubs.length ? clubs.map((c) => `
+    <div class="club-row" data-id="${esc(c.id)}">
+      <span class="token">${esc(c.code)}</span>
+      <span class="grow"><div class="nm">${esc(c.name)}</div>
+        <div class="sub">Tokens issued: ${Math.max((c.nextToken || 1) - 1, 0)}</div></span>
+      <button type="button" class="btn btn-light btn-sm" data-act="leads">Leads</button>
+      <button type="button" class="btn btn-light btn-sm" data-act="pin">Change PIN</button>
+    </div>`).join("") : `<div class="empty">No clubs yet. Add the first club above.</div>`;
+}
+
+$("#clubList").addEventListener("click", async (e) => {
+  const row = e.target.closest(".club-row");
+  if (!row) return;
+  const c = clubs.find((x) => x.id === row.dataset.id);
+  if (!c) return;
+  if (e.target.dataset.act === "leads") {
+    ownerSel = c.id;
+    renderOwnerSelects();
+    startOwnerLeads();
+    openOwnerTab("leads");
+  }
+  if (e.target.dataset.act === "pin") changePin(c);
+});
+
+const addForm = $("#addClubForm");
+addForm.clubCode.addEventListener("input", () =>
+  (addForm.clubCode.value = addForm.clubCode.value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 6)));
+addForm.clubPinNew.addEventListener("input", () =>
+  (addForm.clubPinNew.value = addForm.clubPinNew.value.replace(/\D/g, "").slice(0, 4)));
+
+/** Create a hidden Firebase login for a club and return its email + uid */
+async function createClubAccount(clubId, pin) {
+  const email = `club-${clubId}-${Date.now()}@${CLUB_EMAIL_DOMAIN}`;
+  const ca = getCreatorAuth();
+  const cred = await createUserWithEmailAndPassword(ca, email, clubPassword(clubId, pin));
+  const uid = cred.user.uid;
+  await signOut(ca);
+  return { email, uid };
+}
+function accountError(ex) {
+  const c = ex.code || "";
+  if (c.includes("operation-not-allowed") || c.includes("admin-restricted")) {
+    return "Firebase sign-up is OFF. Turn ON 'Enable create (sign-up)' in Authentication → Settings → User actions.";
+  }
+  if (c.includes("network")) return "No internet connection.";
+  return "Could not create the club login. Try again.";
+}
+
+addForm.onsubmit = async (e) => {
+  e.preventDefault();
+  const name = addForm.clubName.value.trim();
+  const code = addForm.clubCode.value.trim();
+  const pin = addForm.clubPinNew.value.trim();
+  if (!name) return toast("Enter the club name", true);
+  if (!/^[A-Z0-9]{2,6}$/.test(code)) return toast("Short code: 2–6 letters/numbers, e.g. SALT", true);
+  if (!/^\d{4}$/.test(pin)) return toast("PIN must be exactly 4 digits", true);
+  const id = code.toLowerCase();
+  if (clubs.some((c) => c.id === id)) return toast(`Code ${code} is already used by another club`, true);
+  if (clubs.some((c) => c.name.toLowerCase() === name.toLowerCase())) return toast("A club with this name already exists", true);
+
+  loading(true);
+  $("#addClubBtn").disabled = true;
+  try {
+    const acc = await createClubAccount(id, pin);
+    const batch = writeBatch(db);
+    batch.set(doc(db, "clubs", id), {
+      name, code, authEmail: acc.email, uid: acc.uid, nextToken: 1, createdAt: serverTimestamp(),
+    });
+    batch.set(doc(db, "members", acc.uid), { clubId: id });
+    await batch.commit();
+    addForm.reset();
+    loading(false);
+    await modal(`<h3>Club added ✅</h3>
+      <p><b>${esc(name)}</b> can now login by selecting its name and entering this PIN:</p>
+      <div class="token-big">${esc(pin)}</div>
+      <p class="note">Tokens for this club will look like <b>${esc(code)}-001</b>.</p>`);
+  } catch (ex) {
+    console.error(ex);
+    toast(accountError(ex), true);
+  } finally {
+    loading(false);
+    $("#addClubBtn").disabled = false;
+  }
+};
+
+async function changePin(c) {
+  const ok = await modal(
+    `<h3>Change PIN</h3><p><b>${esc(c.name)}</b>: phones logged in with the old PIN will be logged out.</p>
+     <label class="field"><span>New 4-digit PIN</span>
+     <input type="tel" id="newPinInput" inputmode="numeric" maxlength="4" autocomplete="off" /></label>`,
+    [{ label: "Cancel", cls: "btn-light", value: false }, { label: "Save PIN", cls: "btn-primary", value: true }]
+  );
+  if (!ok) return;
+  const pin = ($("#newPinInput")?.value || "").trim();
+  if (!/^\d{4}$/.test(pin)) return toast("PIN must be exactly 4 digits", true);
+  loading(true);
+  try {
+    const acc = await createClubAccount(c.id, pin);
+    const batch = writeBatch(db);
+    batch.update(doc(db, "clubs", c.id), { authEmail: acc.email, uid: acc.uid });
+    batch.set(doc(db, "members", acc.uid), { clubId: c.id });
+    if (c.uid) batch.delete(doc(db, "members", c.uid));
+    await batch.commit();
+    toast(`PIN changed for ${c.name}`);
+  } catch (ex) {
+    console.error(ex);
+    toast(accountError(ex), true);
+  } finally {
+    loading(false);
+  }
+}
+
 setEnergyUI(false);

@@ -15,40 +15,53 @@
   <section id="loginScreen" class="screen hidden">
     <div class="login-card">
       <div class="login-badge">Durga Puja 2026</div>
-      <h1 class="club-name">TS Global Wellness Club</h1>
-      <p class="login-sub">Wellness Campaign · Staff Login</p>
+      <h1 class="club-name">Wellness Campaign</h1>
+      <p class="login-sub" id="loginSub">Club Login</p>
 
-      <div id="setupWarning" class="setup-warning hidden">
-        Firebase is not connected yet. Paste your project config in <b>firebase-config.js</b>.
-      </div>
+      <!-- Club login -->
+      <form id="clubLoginForm" autocomplete="off">
+        <label class="field">
+          <span>Select your club</span>
+          <select id="clubSelect"><option value="">Loading clubs…</option></select>
+        </label>
+        <label class="field">
+          <span>4-digit PIN</span>
+          <div class="pw-wrap">
+            <input type="password" id="clubPin" inputmode="numeric" maxlength="4" pattern="\d*" autocomplete="off" />
+            <button type="button" class="pw-toggle" data-target="clubPin" aria-label="Show PIN"></button>
+          </div>
+        </label>
+        <p id="clubLoginError" class="error-text"></p>
+        <button type="submit" id="clubLoginBtn" class="btn btn-primary btn-block">Login</button>
+      </form>
 
-      <form id="loginForm" autocomplete="on">
+      <!-- Owner login -->
+      <form id="ownerLoginForm" class="hidden" autocomplete="on">
         <label class="field">
           <span>Email</span>
-          <input type="email" id="loginEmail" required autocomplete="username" />
+          <input type="email" id="loginEmail" autocomplete="username" />
         </label>
         <label class="field">
           <span>Password</span>
           <div class="pw-wrap">
-            <input type="password" id="loginPassword" required autocomplete="current-password" />
-            <button type="button" id="pwToggle" class="pw-toggle" aria-label="Show password">
-              <svg id="eyeOpen" viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M12 5c-7 0-10 7-10 7s3 7 10 7 10-7 10-7-3-7-10-7zm0 11.5A4.5 4.5 0 1 1 12 7.5a4.5 4.5 0 0 1 0 9zm0-7a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5z"/></svg>
-              <svg id="eyeClosed" class="hidden" viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M2.1 3.5 3.5 2.1l18.4 18.4-1.4 1.4-3.2-3.2A11 11 0 0 1 12 19C5 19 2 12 2 12a17.6 17.6 0 0 1 4.2-5.4L2.1 3.5zM12 5c7 0 10 7 10 7a17.4 17.4 0 0 1-3.1 4.4l-3.5-3.5A4.5 4.5 0 0 0 10.1 7.6L7.9 5.4A11 11 0 0 1 12 5zm-4.4 6.4a4.5 4.5 0 0 0 5 5z"/></svg>
-            </button>
+            <input type="password" id="loginPassword" autocomplete="current-password" />
+            <button type="button" class="pw-toggle" data-target="loginPassword" aria-label="Show password"></button>
           </div>
         </label>
         <p id="loginError" class="error-text"></p>
-        <button type="submit" id="loginBtn" class="btn btn-primary btn-block">Login</button>
+        <button type="submit" id="loginBtn" class="btn btn-primary btn-block">Owner Login</button>
       </form>
+
+      <button type="button" id="switchLogin" class="link-btn">Owner login</button>
     </div>
     <footer class="credit">Developed by <a href="https://sparkshums.netlify.app/" target="_blank" rel="noopener">Spark Shums</a></footer>
   </section>
 
-  <!-- ================= APP ================= -->
+  <!-- ================= CLUB APP ================= -->
   <section id="appScreen" class="screen hidden">
     <header class="app-header">
       <div>
-        <div class="hdr-title">TS Global Wellness Club</div>
+        <div class="hdr-title" id="clubTitle">Club</div>
         <div class="hdr-sub">Wellness Campaign · Durga Puja 2026</div>
       </div>
       <button id="logoutBtn" class="btn-ghost" title="Logout">Logout</button>
@@ -215,7 +228,7 @@
       <!-- ---------- 4. LEADS ---------- -->
       <section id="tab-leads" class="panel">
         <div class="panel-head">
-          <h2>Leads</h2>
+          <h2 id="leadsTitle">Leads</h2>
           <button type="button" id="exportBtn" class="btn btn-light btn-sm">Export CSV</button>
         </div>
         <input type="search" id="leadSearch" class="search" placeholder="Search token, name or mobile" />
@@ -225,6 +238,7 @@
           <button class="chip" data-f="consult">Consultation: Yes</button>
           <button class="chip" data-f="income">Income: Yes</button>
           <button class="chip" data-f="incomplete">Incomplete</button>
+          <button class="chip chip-bin" data-f="bin">🗑 Recycle Bin</button>
         </div>
         <div class="list-label" id="leadCount"></div>
         <div id="leadList"></div>
@@ -238,6 +252,78 @@
       <button class="tab" data-tab="body"><span class="ti">⚖️</span>Body Check</button>
       <button class="tab" data-tab="gift"><span class="ti">🎁</span>Verify &amp; Gift</button>
       <button class="tab" data-tab="leads"><span class="ti">📋</span>Leads</button>
+    </nav>
+  </section>
+
+  <!-- ================= OWNER PANEL ================= -->
+  <section id="ownerScreen" class="screen hidden">
+    <header class="app-header">
+      <div>
+        <div class="hdr-title">Owner Panel</div>
+        <div class="hdr-sub">Wellness Campaign · Durga Puja 2026</div>
+      </div>
+      <button id="ownerLogoutBtn" class="btn-ghost" title="Logout">Logout</button>
+    </header>
+
+    <div class="stats">
+      <div class="stat"><b id="oStatClubs">0</b><span>Clubs</span></div>
+      <div class="stat"><b id="oStatLeads">0</b><span>Leads</span></div>
+      <div class="stat"><b id="oStatBody">0</b><span>Body Checked</span></div>
+      <div class="stat"><b id="oStatGift">0</b><span>Gifts Given</span></div>
+    </div>
+
+    <main class="panels">
+
+      <!-- ---------- CLUBS ---------- -->
+      <section id="o-clubs" class="panel active">
+        <div class="panel-head"><h2>Clubs</h2></div>
+        <form id="addClubForm" class="card" novalidate>
+          <h3 class="sec-title">Add New Club</h3>
+          <label class="field"><span>Club Name *</span>
+            <input name="clubName" type="text" autocomplete="off" placeholder="e.g. Salt Lake Wellness Club" /></label>
+          <div class="row-2">
+            <label class="field"><span>Short Code * (for tokens)</span>
+              <input name="clubCode" type="text" autocomplete="off" maxlength="6" placeholder="e.g. SALT" /></label>
+            <label class="field"><span>4-digit PIN *</span>
+              <input name="clubPinNew" type="tel" inputmode="numeric" maxlength="4" autocomplete="off" placeholder="e.g. 4821" /></label>
+          </div>
+          <button type="submit" id="addClubBtn" class="btn btn-primary btn-block">Add Club</button>
+        </form>
+        <div class="list-label" id="clubCount"></div>
+        <div id="clubList" class="mini-list"></div>
+      </section>
+
+      <!-- ---------- ALL LEADS ---------- -->
+      <section id="o-leads" class="panel">
+        <div class="panel-head">
+          <h2>All Leads</h2>
+          <button type="button" id="oExportBtn" class="btn btn-light btn-sm">Export CSV</button>
+        </div>
+        <select id="oClubSel" class="club-sel"></select>
+        <input type="search" id="oLeadSearch" class="search" placeholder="Search token, name or mobile" />
+        <div class="list-label" id="oLeadCount"></div>
+        <div id="oLeadList"></div>
+      </section>
+
+      <!-- ---------- RECYCLE BIN ---------- -->
+      <section id="o-bin" class="panel">
+        <div class="panel-head">
+          <h2>Recycle Bin</h2>
+          <button type="button" id="oPurgeAll" class="btn btn-danger btn-sm">Delete All Shown</button>
+        </div>
+        <select id="oBinClubSel" class="club-sel"></select>
+        <input type="search" id="oBinSearch" class="search" placeholder="Search token, name or mobile" />
+        <div class="list-label" id="oBinCount"></div>
+        <div id="oBinList"></div>
+      </section>
+
+      <footer class="credit in-app">Developed by <a href="https://sparkshums.netlify.app/" target="_blank" rel="noopener">Spark Shums</a></footer>
+    </main>
+
+    <nav class="tabbar">
+      <button class="tab active" data-otab="clubs"><span class="ti">🏠</span>Clubs</button>
+      <button class="tab" data-otab="leads"><span class="ti">📋</span>All Leads</button>
+      <button class="tab" data-otab="bin"><span class="ti">🗑</span>Recycle Bin</button>
     </nav>
   </section>
 

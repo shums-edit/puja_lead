@@ -1,35 +1,25 @@
-# Wellness Campaign – Durga Puja 2026 (TS Global Wellness Club)
+# Wellness Campaign – Durga Puja 2026 (Multi-Club)
 
-Lead registration app for the Puja stall. Club members enter everything; visitors don't touch the phone.
+## Logins
+- **Club login** (default screen): select club from dropdown + 4-digit PIN. Each club sees only its own leads.
+- **Owner login** (tap "Owner login"): email + password. Owners: set in `firebase-config.js` AND `firestore.rules`.
 
-## Screens
-1. **Register** (Member 2) – PDF 1 sections 1, 2, 4 + Health Goal + Energy slider → gives a token (TS-001 …)
-2. **Body Check** (Member 3) – pick visitor, type Height / Weight / BMI / BMI Category exactly as the machine shows. Nothing is calculated.
-3. **Verify & Gift** (Member 4) – shows full details + what's missing. "Mark Gift Given" is locked until the entry is complete (Golden Rule).
-4. **Leads** – search, filters, Call / WhatsApp buttons, Follow-up done tick, View / Edit / Delete, Export CSV.
+## Club screens
+Register · Body Check · Verify & Gift · Leads (with 🗑 Recycle Bin: delete → bin, restore from bin).
+Tokens are per club using the club's short code (e.g. SALT-001).
 
-All phones see the same data live.
+## Owner panel
+- **Clubs**: add club (name, short code, PIN), change PIN, open a club's leads.
+- **All Leads**: filter by club or All, search, view, move to bin, export CSV (with Club column).
+- **Recycle Bin**: restore, or delete forever (needs the 10-digit security key).
 
-## Setup (one time)
-1. **Firebase Console** → create a project.
-2. **Authentication** → Sign-in method → enable **Email/Password**.
-3. **Authentication → Users → Add user** – create one login per club member (or one shared login).
-4. **Firestore Database** → Create database → then **Rules** tab, paste and Publish:
+## Firebase setup (one time)
+1. Authentication → Sign-in method → **Email/Password ON**.
+2. Authentication → Settings → User actions → **Enable create (sign-up) ON** (needed so the Owner panel can create club logins; strangers still can't read data because of the rules).
+3. Authentication → Users: owner accounts already added.
+4. Firestore Database → **Rules**: replace everything with the contents of `firestore.rules` → **Publish**.
+5. Before the real camp: upgrade project to **Blaze** + set a budget alert.
 
-```
-rules_version = '2';
-service cloud.firestore {
-  match /databases/{database}/documents {
-    match /{document=**} {
-      allow read, write: if request.auth != null;
-    }
-  }
-}
-```
-
-5. **Project settings → Your apps → Web app (</>)** → copy the config into `firebase-config.js`.
-6. **Netlify** → drag the whole folder to deploy. Open the link on each member's phone and log in.
-
-## Before the event
-- Do 2–3 test entries, then delete them from Leads.
-- Token numbers keep counting up. To restart from TS-001, delete the `meta/counter` document in Firestore.
+## Notes
+- Changing a club's PIN logs out every phone using the old PIN.
+- Old test leads from the first version have no club, so they won't show anywhere. Delete them in Firestore Console (`leads` collection and `meta` collection) if you like.

@@ -1,0 +1,48 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() { return request.auth != null; }
+
+    function isOwner() {
+      return signedIn() &&
+        request.auth.token.email in ['tarekfitcoach786@gmail.com', 'admin.alphaacademy@gmail.com'];
+    }
+
+    function isMember() {
+      return signedIn() &&
+        exists(/databases/$(database)/documents/members/$(request.auth.uid));
+    }
+
+    function myClub() {
+      return get(/databases/$(database)/documents/members/$(request.auth.uid)).data.clubId;
+    }
+
+    // Club list (names for the login dropdown) is public; only owners manage it.
+    // A club may only bump its own token counter.
+    match /clubs/{clubId} {
+      allow read: if true;
+      allow create, delete: if isOwner();
+      allow update: if isOwner() ||
+        (isMember() && myClub() == clubId &&
+         request.resource.data.diff(resource.data).affectedKeys().hasOnly(['nextToken']));
+    }
+
+    // Which club each hidden club account belongs to
+    match /members/{uid} {
+      allow read: if isOwner() || (signedIn() && request.auth.uid == uid);
+      allow write: if isOwner();
+    }
+
+    // Leads: each club sees only its own; owners see all.
+    // Only owners can delete permanently.
+    match /leads/{leadId} {
+      allow read: if isOwner() || (isMember() && resource.data.clubId == myClub());
+      allow create: if isMember() && request.resource.data.clubId == myClub();
+      allow update: if isOwner() ||
+        (isMember() && resource.data.clubId == myClub() &&
+         request.resource.data.clubId == resource.data.clubId);
+      allow delete: if isOwner();
+    }
+  }
+}

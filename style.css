@@ -291,3 +291,23 @@ input[type=range].untouched { opacity: .5; }
 
 #modalActions { flex-wrap: wrap; }
 #modalActions .btn { flex: 1 1 40%; }
+
+/* ---------- Multi-club additions ---------- */
+.link-btn {
+  display: block; margin: 14px auto 0; background: none; border: 0; color: var(--green);
+  font: 600 13.5px "Poppins", sans-serif; cursor: pointer; text-decoration: underline;
+}
+.club-sel { margin-bottom: 10px; font-weight: 500; }
+#ownerScreen .tabbar { grid-template-columns: repeat(3, 1fr); }
+.club-row {
+  display: flex; align-items: center; gap: 8px; background: #fff; border: 1px solid var(--line);
+  border-radius: 12px; padding: 11px 12px; flex-wrap: wrap;
+}
+.club-row .grow { flex: 1; min-width: 120px; }
+.club-row .nm { font-weight: 600; }
+.club-row .sub { font-size: 12.5px; color: var(--muted); }
+.chip-bin { border-color: #f1c6c2; color: var(--red); }
+.chip-bin.active { background: var(--red); border-color: var(--red); color: #fff; }
+.lead-card.in-bin { border-color: #f1c6c2; background: #fffafa; }
+.lc-actions .restore { color: var(--green); border-color: var(--green); }
+.lc-actions .danger { color: var(--red); border-color: #f1c6c2; }
