@@ -215,7 +215,7 @@ input[type=range].untouched { opacity: .5; }
 .lc-actions .fu { margin-left: auto; display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--muted); }
 .lc-actions .fu input { width: 18px; height: 18px; accent-color: var(--green); }
 
-.chips { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 4px; margin-bottom: 4px; scrollbar-width: none; }
+.chips { display: flex; gap: 6px; flex-wrap: wrap; padding-bottom: 4px; margin-bottom: 4px; }
 .chip {
   flex-shrink: 0; border: 1.5px solid var(--line); background: #fff; color: var(--muted);
   font: 500 12.5px "Poppins", sans-serif; padding: 6px 12px; border-radius: 99px; cursor: pointer;
@@ -311,3 +311,8 @@ input[type=range].untouched { opacity: .5; }
 .lead-card.in-bin { border-color: #f1c6c2; background: #fffafa; }
 .lc-actions .restore { color: var(--green); border-color: var(--green); }
 .lc-actions .danger { color: var(--red); border-color: #f1c6c2; }
+.pin-line { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--muted); margin-top: 2px; }
+.pin-val { color: var(--ink); letter-spacing: 1px; }
+.pin-eye { background: none; border: 0; padding: 2px; color: var(--muted); cursor: pointer; display: flex; }
+.danger-zone { border-color: #f1c6c2; background: #fffafa; margin-top: 24px; }
+.danger-zone h3 { margin: 0 0 4px; color: var(--red); font-size: 15px; }

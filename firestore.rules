@@ -28,6 +28,11 @@ service cloud.firestore {
          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['nextToken']));
     }
 
+    // Club PINs: only owners can read or write
+    match /clubSecrets/{clubId} {
+      allow read, write: if isOwner();
+    }
+
     // Which club each hidden club account belongs to
     match /members/{uid} {
       allow read: if isOwner() || (signedIn() && request.auth.uid == uid);

@@ -3,7 +3,7 @@ import {
   getAuth, signInWithEmailAndPassword, onAuthStateChanged, signOut, createUserWithEmailAndPassword
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import {
-  getFirestore, collection, doc, getDoc, onSnapshot, query, where,
+  getFirestore, collection, doc, getDoc, getDocs, onSnapshot, query, where,
   runTransaction, updateDoc, writeBatch, serverTimestamp
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import { firebaseConfig, OWNER_EMAILS, KEY_HASH, CLUB_EMAIL_DOMAIN } from "./firebase-config.js";
@@ -66,17 +66,17 @@ async function sha256(text) {
 }
 
 /** Ask for the 10-digit security key. Resolves true only if correct. */
-async function askKey(title, text) {
+async function askKey(title, text, okLabel = "Delete Forever", okCls = "btn-danger") {
   const ok = await modal(
     `<h3>${title}</h3><p>${text}</p>
      <label class="field"><span>10-digit security key</span>
      <input type="password" id="keyInput" inputmode="numeric" maxlength="10" autocomplete="off" /></label>`,
-    [{ label: "Cancel", cls: "btn-light", value: false }, { label: "Delete Forever", cls: "btn-danger", value: true }]
+    [{ label: "Cancel", cls: "btn-light", value: false }, { label: okLabel, cls: okCls, value: true }]
   );
   if (!ok) return false;
   const val = ($("#keyInput")?.value || "").trim();
   if ((await sha256(val)) !== KEY_HASH) {
-    toast("Wrong security key. Nothing was deleted.", true);
+    toast("Wrong security key.", true);
     return false;
   }
   return true;
@@ -1065,14 +1065,46 @@ $("#oExportBtn").onclick = () => {
   exportCSV(ownerActive().slice().reverse(), c ? `${c.code}-leads` : "all-clubs-leads", true);
 };
 
+/* ---------- Delete ALL leads (all clubs) ---------- */
+$("#wipeAllBtn").onclick = async () => {
+  const ok = await askKey("Delete ALL leads?",
+    `This permanently deletes <b>every lead from every club</b>, including the Recycle Bin.
+     Clubs, names and PINs stay. Token numbers restart from 001. This cannot be undone.`,
+    "Delete All Leads", "btn-danger");
+  if (!ok) return;
+  loading(true);
+  try {
+    const snap = await getDocs(collection(db, "leads"));
+    const ids = snap.docs.map((d) => d.id);
+    for (let i = 0; i < ids.length; i += 400) {
+      const batch = writeBatch(db);
+      ids.slice(i, i + 400).forEach((id) => batch.delete(doc(db, "leads", id)));
+      await batch.commit();
+    }
+    const cb = writeBatch(db);
+    clubs.forEach((c) => cb.update(doc(db, "clubs", c.id), { nextToken: 1 }));
+    if (clubs.length) await cb.commit();
+    loading(false);
+    await modal(`<h3>All leads deleted</h3><p>${ids.length} lead${ids.length === 1 ? "" : "s"} removed. All clubs and PINs are unchanged.</p>`);
+  } catch (err) {
+    console.error(err);
+    toast("Delete failed. Check internet and try again.", true);
+  } finally {
+    loading(false);
+  }
+};
+
 /* ---------- Clubs management ---------- */
+const revealedPins = {}; // clubId -> pin, only after the security key was entered
 function renderClubList() {
   $("#clubCount").textContent = `${clubs.length} club${clubs.length === 1 ? "" : "s"}`;
   $("#clubList").innerHTML = clubs.length ? clubs.map((c) => `
     <div class="club-row" data-id="${esc(c.id)}">
       <span class="token">${esc(c.code)}</span>
       <span class="grow"><div class="nm">${esc(c.name)}</div>
-        <div class="sub">Tokens issued: ${Math.max((c.nextToken || 1) - 1, 0)}</div></span>
+        <div class="sub">Tokens issued: ${Math.max((c.nextToken || 1) - 1, 0)}</div>
+        <div class="pin-line">PIN: <b class="pin-val">${revealedPins[c.id] ? esc(revealedPins[c.id]) : "••••"}</b>
+          <button type="button" class="pin-eye" data-act="showpin" aria-label="Show PIN">${revealedPins[c.id] ? EYE_CLOSED : EYE_OPEN}</button></div></span>
       <button type="button" class="btn btn-light btn-sm" data-act="leads">Leads</button>
       <button type="button" class="btn btn-light btn-sm" data-act="pin">Change PIN</button>
     </div>`).join("") : `<div class="empty">No clubs yet. Add the first club above.</div>`;
@@ -1083,13 +1115,15 @@ $("#clubList").addEventListener("click", async (e) => {
   if (!row) return;
   const c = clubs.find((x) => x.id === row.dataset.id);
   if (!c) return;
-  if (e.target.dataset.act === "leads") {
+  if (e.target.closest("[data-act]")?.dataset.act === "leads") {
     ownerSel = c.id;
     renderOwnerSelects();
     startOwnerLeads();
     openOwnerTab("leads");
   }
-  if (e.target.dataset.act === "pin") changePin(c);
+  const act = e.target.closest("[data-act]")?.dataset.act;
+  if (act === "pin") changePin(c);
+  if (act === "showpin") togglePin(c);
 });
 
 const addForm = $("#addClubForm");
@@ -1137,6 +1171,7 @@ addForm.onsubmit = async (e) => {
       name, code, authEmail: acc.email, uid: acc.uid, nextToken: 1, createdAt: serverTimestamp(),
     });
     batch.set(doc(db, "members", acc.uid), { clubId: id });
+    batch.set(doc(db, "clubSecrets", id), { pin });
     await batch.commit();
     addForm.reset();
     loading(false);
@@ -1152,6 +1187,23 @@ addForm.onsubmit = async (e) => {
     $("#addClubBtn").disabled = false;
   }
 };
+
+async function togglePin(c) {
+  if (revealedPins[c.id]) { delete revealedPins[c.id]; renderClubList(); return; }
+  const ok = await askKey("Show PIN", `Enter the security key to see the PIN of <b>${esc(c.name)}</b>.`, "Show PIN", "btn-primary");
+  if (!ok) return;
+  try {
+    const snap = await getDoc(doc(db, "clubSecrets", c.id));
+    if (!snap.exists()) {
+      return modal(`<h3>PIN not saved</h3><p>This club was added before PINs were saved. Use <b>Change PIN</b> once to set a new PIN, and it will be viewable after that.</p>`);
+    }
+    revealedPins[c.id] = snap.data().pin;
+    renderClubList();
+  } catch (err) {
+    console.error(err);
+    toast("Could not load PIN. Check that the latest Firestore rules are published.", true);
+  }
+}
 
 async function changePin(c) {
   const ok = await modal(
@@ -1170,7 +1222,9 @@ async function changePin(c) {
     batch.update(doc(db, "clubs", c.id), { authEmail: acc.email, uid: acc.uid });
     batch.set(doc(db, "members", acc.uid), { clubId: c.id });
     if (c.uid) batch.delete(doc(db, "members", c.uid));
+    batch.set(doc(db, "clubSecrets", c.id), { pin });
     await batch.commit();
+    if (revealedPins[c.id]) { revealedPins[c.id] = pin; renderClubList(); }
     toast(`PIN changed for ${c.name}`);
   } catch (ex) {
     console.error(ex);
