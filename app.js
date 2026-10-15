@@ -138,6 +138,8 @@ const CHALLENGES = [
    Status logic
    ============================================================ */
 const bodyDone = (l) => !!(l.height && l.weight && l.bmi && l.bmiCategory);
+const bodySkipped = (l) => !!l.bodySkipped && !bodyDone(l);
+const bodyHandled = (l) => bodyDone(l) || bodySkipped(l); // done OR skipped
 const active = () => leads.filter((l) => !l.deleted);
 
 function missingItems(l) {
@@ -156,10 +158,12 @@ function missingItems(l) {
   if ((l.challenges || []).includes("Other") && !l.challengeOther) m.push("Other disease details");
   if (!l.wantsConsultation) m.push("Wellness Consultation (Yes/No)");
   if (!l.incomeInterest) m.push("Income opportunity (Yes/No)");
-  if (!l.height) m.push("Height");
-  if (!l.weight) m.push("Weight");
-  if (!l.bmi) m.push("BMI");
-  if (!l.bmiCategory) m.push("BMI Category");
+  if (!bodySkipped(l)) {
+    if (!l.height) m.push("Height");
+    if (!l.weight) m.push("Weight");
+    if (!l.bmi) m.push("BMI");
+    if (!l.bmiCategory) m.push("BMI Category");
+  }
   return m;
 }
 const isComplete = (l) => missingItems(l).length === 0;
@@ -614,12 +618,13 @@ function renderBodyList() {
     list = active().filter((l) => matches(l, q));
     $("#bodyListLabel").textContent = `Search results (${list.length})`;
   } else {
-    list = active().filter((l) => !bodyDone(l)).reverse();
+    list = active().filter((l) => !bodyHandled(l)).reverse();
     $("#bodyListLabel").textContent = `Waiting for body check (${list.length})`;
   }
   $("#bodyList").innerHTML = list.length
     ? list.slice(0, 60).map((l) => miniItem(l, bodyDone(l)
-        ? `<span class="badge b-ok">Done</span>` : `<span class="badge b-warn">Pending</span>`)).join("")
+        ? `<span class="badge b-ok">Done</span>`
+        : bodySkipped(l) ? `<span class="badge b-skip">Skipped</span>` : `<span class="badge b-warn">Pending</span>`)).join("")
     : `<div class="empty">${q.trim() ? "No match found." : "No one is waiting. 🎉"}</div>`;
 }
 $("#bodySearch").addEventListener("input", renderBodyList);
@@ -642,6 +647,7 @@ function openBody(id) {
   $$("input[name=bmiCategory]", bodyForm).forEach((r) => (r.checked = r.value === l.bmiCategory));
   $$(".invalid, .invalid-group", bodyForm).forEach((el) => el.classList.remove("invalid", "invalid-group"));
   $("#bodySubmit").textContent = bodyDone(l) ? "Update Body Check" : "Save Body Check";
+  $("#bodySkip").classList.toggle("hidden", bodyHandled(l));
   $("#bodyPick").classList.add("hidden");
   bodyForm.classList.remove("hidden");
   openTab("body");
@@ -681,9 +687,29 @@ bodyForm.onsubmit = async (e) => {
 
   loading(true);
   try {
-    await updateDoc(doc(db, "leads", bodyId), { ...d, bodyCheckAt: serverTimestamp() });
+    await updateDoc(doc(db, "leads", bodyId), { ...d, bodySkipped: false, bodyCheckAt: serverTimestamp() });
     const l = leads.find((x) => x.id === bodyId);
     toast(`Body check saved for ${l?.token || ""}`);
+    closeBody();
+  } catch (err) {
+    console.error(err);
+    toast("Save failed. Check internet and try again.", true);
+  } finally {
+    loading(false);
+  }
+};
+
+$("#bodySkip").onclick = async () => {
+  const l = leads.find((x) => x.id === bodyId);
+  if (!l) return;
+  const ok = await confirmBox("Skip body check?",
+    `Skip body check for <b>${esc(l.token)} – ${esc(l.name)}</b>? They can still get the gift. You can fill the body details later.`,
+    "Yes, Skip", "btn-gold");
+  if (!ok) return;
+  loading(true);
+  try {
+    await updateDoc(doc(db, "leads", l.id), { bodySkipped: true, bodySkippedAt: serverTimestamp() });
+    toast(`Body check skipped for ${l.token}`);
     closeBody();
   } catch (err) {
     console.error(err);
@@ -745,6 +771,7 @@ function detailTable(l, showClub = false) {
     ${l.onMedication === "Yes" ? row("Medicine / condition", l.medicationDetails) : ""}
     ${row("Physical challenges", ch)}
     ${sec("3. Body Parameter Check")}
+    ${bodySkipped(l) ? `<tr><td colspan="2"><span class="badge b-skip">Body check skipped</span></td></tr>` : ""}
     ${row("Height", l.height ? `${l.height} ${l.heightUnit || ""}` : "")}
     ${row("Weight", l.weight ? `${l.weight} kg` : "")}
     ${row("BMI", l.bmi)}
@@ -754,7 +781,7 @@ function detailTable(l, showClub = false) {
     ${row("Income opportunity", l.incomeInterest)}
     ${sec("Record")}
     ${row("Registered", fmtTime(l.createdAt))}
-    ${row("Body check", fmtTime(l.bodyCheckAt))}
+    ${row("Body check", bodySkipped(l) ? `Skipped · ${fmtTime(l.bodySkippedAt)}` : fmtTime(l.bodyCheckAt))}
     ${row("Gift", l.giftGiven ? `Given · ${fmtTime(l.giftAt)}` : "Not given")}
     ${l.deleted ? row("In Recycle Bin since", fmtTime(l.deletedAt)) : ""}
   </table>`;
@@ -835,7 +862,8 @@ function filteredLeads() {
 
 function badges(l) {
   const b = [];
-  b.push(bodyDone(l) ? `<span class="badge b-ok">Body ✓</span>` : `<span class="badge b-warn">Body pending</span>`);
+  b.push(bodyDone(l) ? `<span class="badge b-ok">Body ✓</span>`
+    : bodySkipped(l) ? `<span class="badge b-skip">Body Skipped</span>` : `<span class="badge b-warn">Body pending</span>`);
   b.push(l.giftGiven ? `<span class="badge b-ok">Gift ✓</span>` : `<span class="badge b-warn">No gift</span>`);
   if (l.wantsConsultation === "Yes") b.push(`<span class="badge b-ok">Consultation</span>`);
   if (l.incomeInterest === "Yes") b.push(`<span class="badge b-ok">Income</span>`);
@@ -943,6 +971,7 @@ function exportCSV(list, filename, withClub) {
     ["Physical Challenges", (l) => (l.challenges || []).map((c) => (c === "Other" ? "Other Disease" : c)).join("; ")], ["Other Disease", (l) => l.challengeOther],
     ["Height", (l) => l.height], ["Height Unit", (l) => l.heightUnit], ["Weight (kg)", (l) => l.weight],
     ["BMI", (l) => l.bmi], ["BMI Category", (l) => l.bmiCategory],
+    ["Body Check", (l) => (bodyDone(l) ? "Done" : bodySkipped(l) ? "Skipped" : "Pending")],
     ["Wellness Consultation", (l) => l.wantsConsultation], ["Income Opportunity", (l) => l.incomeInterest],
     ["Gift Given", (l) => (l.giftGiven ? "Yes" : "No")], ["Follow-up Done", (l) => (l.followUpDone ? "Yes" : "No")],
     ["Registered At", (l) => fmtTime(l.createdAt)],
